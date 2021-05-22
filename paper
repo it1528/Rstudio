@@ -1,0 +1,537 @@
+install.packages('caret')
+install.packages('topicmodels')
+library(topicmodels)
+library(tidyverse) # metapackage of all tidyverse packages
+install.packages("Amelia")
+library(Amelia)
+install.packages("magrittr") 
+install.packages("dplyr") 
+library(magrittr) 
+library(dplyr) 
+library(reshape2) # Melt
+library(plyr)
+library(tidyverse)
+install.packages("pscl")
+library(pscl)
+library(ggplot2)
+install.packages("VIF")
+library(VIF) 
+install.packages("lmtest")
+library(lmtest)
+install.packages("ROCR")
+library(ROCR)
+install.packages("randomForest")
+library(randomForest)
+install.packages('abind')
+install.packages('zoo')
+install.packages('xts')
+install.packages('quantmod')
+install.packages('ROCR')
+install.packages("DMwR")
+install.packages("tree")
+library(tree)
+install.packages("stringr")
+library(stringr)
+library(caret)
+install.packages( "https://cran.r-project.org/src/contrib/Archive/DMwR/DMwR_0.4.1.tar.gz", repos=NULL, type="source" )
+library("DMwR") 
+library(rpart.plot)
+library(caTools)
+install.packages("PLS")
+library(pls) 
+install.packages('e1071')
+library(e1071)
+library(boot)
+library(gam)
+library(rpart)
+install.packages("rpart.plot")
+library(rpart.plot)
+library(ROCR)
+install.packages("Metrics")
+library(Metrics)
+install.packages("factoextra")
+library(factoextra)
+
+##Load + Clean Data
+#test <- read.csv(file = '/Users/aidamatevosyan/Desktop/Master/Big Data Processing/Dataframe/test.csv')
+df <- read.csv(file = '/Users/aidamatevosyan/Desktop/Master/Big Data Processing/Dataframe/train.csv')
+head(df)
+dim(df)
+boxplot(df$Annual_Premium)
+set.seed(100)
+sample = sample.split(df$Response, SplitRatio = .30)
+newDF = subset(df, sample == TRUE)
+
+head(newDF)
+df <- newDF
+dim(df)
+#PREPROCESSING PART
+#Preprocess of the feature 'Gender' to make it numeric
+df$Gender[df$Gender == 'Female'] <- '1'
+df$Gender[df$Gender == 'Male'] <- '0'
+#Preprocess of the feature 'Vehicle_Damage' to make it numeric
+df$Vehicle_Damage[df$Vehicle_Damage == 'No'] <- '0'
+
+df$Vehicle_Damage[df$Vehicle_Damage == 'Yes'] <- '1'
+
+df$Vehicle_Age[df$Vehicle_Age == '< 1 Year'] <- '0'
+df$Vehicle_Age[df$Vehicle_Age == '1-2 Year'] <- '1'
+df$Vehicle_Age[df$Vehicle_Age == '> 2 Years'] <- '2'
+df$id <- NULL
+
+#Missing Values Check
+#missmap(train, main = "Missing values vs observed")
+sapply(df,function(x) sum(is.na(x)))
+
+#The dataset is imbalanced. We will perform undersampling 
+dim(df)
+
+
+
+#Splitting the dataset into the Training set and Test set
+df$Response <- as.factor(df$Response)
+df$Gender <- as.factor(df$Gender)
+df$Vehicle_Damage <- as.factor(df$Vehicle_Damage)
+df$Vehicle_Age <- as.factor(df$Vehicle_Age)
+
+set.seed(100)
+sample = sample.split(df$Response, SplitRatio = .70)
+train = subset(df, sample == TRUE)
+test  = subset(df, sample == FALSE)
+check = subset(df, sample == TRUE)
+dim(check)
+summary(train)
+summary(test)
+dim(test)
+#traindf <- sample(dim(df)[1],dim(df)[1]*0.9)
+#train <- df[traindf,]
+#test  <- df[-traindf,]
+
+dim(test)
+dim(train)
+str(train)
+
+
+#Balance the dataframe
+
+balanced.data <- SMOTE(Response ~., train, perc.over = 100,perc.under=200)
+prop.table(table(train$Response))
+as.data.frame(table(balanced.data$Response))
+train <- balanced.data
+str(train)
+head(train)
+dim(train)
+dim(test)
+
+
+#Decision Tree
+
+
+ResponseYes <- subset(df, Response == '1')
+ResponseNo <- subset(df, Response == '0')
+
+#Training
+Dtree.fit = rpart(train$Response ~., data = train, method = "class")
+summary(Dtree.fit)
+
+#Predicting 
+DTPred <- predict(Dtree.fit,type = "class", newdata = test)
+confusionMatrix(test$Response, DTPred)
+
+
+
+#Logistic Regression
+#Dependent Binomial variable (train dataset) --> Response
+#In the following steps we will try various classification 
+#algorithms in order to predict the Response based on the rest of the features.
+#################### Cross Val. for the GLM model
+levels(train$Response)=c("Yes","No")
+levels(test$Response)=c("Yes","No")
+ctrl.glm <- trainControl(method="cv", number = 10,
+                         savePredictions ="all",
+                         classProbs = TRUE)
+
+str(train)
+dim(train)
+#Set a random seed for the k-fold validation(for the random assignment)
+set.seed(1234)
+#Specify the glm model
+glm.fit <- train(Response~Age+Driving_License+Previously_Insured+Vehicle_Age
+                 +Vehicle_Damage+Annual_Premium+Policy_Sales_Channel+Vintage, 
+                 data = train,
+                 method="glm", family=binomial,
+                 trControl=ctrl.glm)
+#Kappa is 0.51 --> Good one
+print(glm.fit)
+
+#Regression Coefficients
+summary(glm.fit)
+
+#Predictor variables importance
+varImp(glm.fit)
+
+library(pROC)
+test_prob = predict(glm.fit, newdata = test[,-which(names(test)=="Response")])
+test_roc = roc(test$Response ~ as.numeric(test_prob), plot = TRUE, print.auc = TRUE)
+
+
+#Test Accuracy of Model on test Data
+
+pred.glm <- predict(glm.fit, newdata = test[,-which(names(test)=="Response")])
+confusionMatrix(test_prob, test$Response)
+
+
+p.glm<- predict(glm.fit, test)
+pr.glm<-prediction(as.numeric(p.glm), test$Response)
+pref <- performance(pr.glm, "tpr", "fpr")
+plot.glm <- plot.roc(test$Response, as.numeric(pred.glm),lwd=2, type="b",print.auc=TRUE,col ="green", main="ROC Curve GLM")
+
+
+#GLM on Train data
+glm.cm.train <- confusionMatrix(factor(round(pred.train.glm)), train$Response)
+glm.cm.train
+#GLM on Test Data
+glm.cm <- confusionMatrix(factor((pred.glm)), test$Response)
+glm.cm
+##################
+#Random forest classification
+#Random forests improve predictive accuracy by generating a large number of bootstrapped trees (based on random samples of variables). 
+#Random Forest is a powerful machine learning algorithm which holds a relatively high classification accuracy.
+# Fitting Random Forest Classification to the Training set
+# Cross Validation in Random Forest
+ctrl.rf <- trainControl(method = "cv",
+                         number = 3,
+                         search="random",
+                         savePredictions ="all")
+
+rf.fit <- randomForest(Response ~ ., data = train,
+                       trControl = ctrl.rf, importance=TRUE,ntree=1000)
+print(rf.fit)
+plot(rf.fit)
+test_prob = predict(rf.fit, newdata = test[,-which(names(test)=="Response")])
+head(test_prob)
+
+
+test_roc = roc(test$Response,as.numeric(test_prob), plot = TRUE, print.auc = TRUE)
+
+install.packages("MLeval")
+library(MLeval)
+
+
+roc <- evalm(data.frame(test_prob, test[,-which(names(test)=="Response")]))
+
+
+
+pred.rf.train <- predict(rf.fit,train)
+rf.train.cm <- confusionMatrix(train$Response, pred.rf.train)
+rf.train.cm
+
+ 
+pred.rf <- predict(rf.fit,test[,-which(names(test)=="Response")])
+
+rf.cm <- confusionMatrix(test$Response, pred.rf)
+rf.cm
+mean(pred.rf == test$Response) 
+table(pred.rf,test$Response)
+
+performance(prediction(train.predict,iris$Species),"auc")@y.values[[1]] 
+
+#Important Variables
+importance(rf.fit) 
+
+varImpPlot(rf.fit) 
+
+
+# Predicting the Validation set results
+#y_pred = predict(rf.fit, newdata = test[,-which(names(test)=="Response")])
+# Checking the prediction accuracy
+#table(test$Response, y_pred) # Confusion matrix
+#error <- mean(test$Response != y_pred) # Misclassification error
+#paste('Accuracy',round(1-error,4)) #"Accuracy 0.7291" , 0.59
+#ROC Curve
+
+
+fit <- rpart(Response~. , data= train, method = "class")
+summary(fit)
+
+rpart.plot(fit, type=5, extra=100, box.palette ="-YlGnBl", branch.lty = 2)
+
+pred.rpart <- predict(fit,test[,-which(names(test)=="Response")])
+
+
+
+#################
+#PCA 
+
+
+num_cols <- unlist(lapply(train, is.numeric))  
+num_cols
+train[num_cols] 
+df_pca <- transform(df[ ,num_cols]) 
+dim(df_pca)
+str(df_pca)
+df_pca <- df_pca[,-which(names(df_pca)=="Previously_Insured")]
+df_pca[,-1]
+all_pca <- prcomp(df_pca, scale = TRUE)
+summary(all_pca)
+names(all_pca)
+all_pca$center
+all_pca$scale
+all_pca$rotation
+
+all_pca$sdev
+pr.var <- all_pca$sdev^2
+pve <- pr.var / sum(pr.var)
+pve
+plot(pve, xlab="Principal Component", ylab="Proportion of Variance Explained",
+     ylim=c(0, 1), type='b')
+
+biplot(all_pca, scale=0)
+fviz_eig(all_pca, addlabels=TRUE, ylim=c(0,60), geom = c("bar", "line"), barfill = "pink", barcolor="grey",linecolor = "red", ncp=10)+
+  labs(title = "All Variances - PCA",
+       x = "Principal Components", y = "% of variances")
+
+all_var <- get_pca_var(all_pca)
+all_var
+library("corrplot")
+corrplot(all_var$cos2, is.corr=FALSE)
+set.seed(218)
+res.all <- kmeans(all_var$coord, centers = 3, nstart = 25)
+grp <- as.factor(res.all$cluster)
+grp
+fviz_pca_var(all_pca, col.var = grp, 
+             palette = "jco",
+             legend.title = "Cluster")
+
+
+df$Response <- is.factor(df$Response)
+fviz_pca_biplot(all_pca, col.ind = df$Response, 
+                palette = "jco", geom = "point", repel=TRUE,
+                legend.title="Diagnosis", addEllipses = TRUE)
+
+
+§
+
+
+# Checking the variance of numeric features
+num_cols <- unlist(lapply(train, is.numeric)) 
+numericVal <- train[ ,num_cols]
+num_cols
+train.log <- train
+test.log <- test
+train.log[num_cols] = scale(train[num_cols])
+test.log[num_cols] = scale(test[num_cols])
+install.packages("GGally")
+install.packages("ggplot2")
+library(GGally)
+
+ggpairs(train)
+library(caret)
+#Radial
+
+dim(train)
+data(train, package = "MASS")
+svm.fit <- svm(formula = Response~., data=train, type= 'C-classification', kernel = 'linear',
+               scale=FALSE)
+print(svm.fit)
+
+
+y_pred <- predict(svm.fit, newdata = test[,-which(names(test)=="Response")])
+table(test$Response, y_pred) # Confusion matrix
+error <- mean(test$Response != y_pred) # Misclassification error
+paste('Accuracy',round(1-error,4)) #"Accuracy 0.5819"
+#PLOT
+install.packages("pROC")
+library(pROC)
+y_pred.train <- predict(svm.fit, newdata = train)
+svm.train.cm <- confusionMatrix(y_pred.train, train$Response)
+svm.train.cm
+
+
+svm.cm <- confusionMatrix(y_pred, test$Response)
+svm.cm
+
+test.rf.plot<- plot.roc(as.numeric(test$Response), as.numeric(y_pred),lwd=2, type="b",print.auc=TRUE,col ="green")
+#AUC = 0.758
+
+svm.tune <- tune(svm, Response~., data = test,
+                 ranges = list(gamma = 2^(-8:1), cost = 2^(0:4)),
+                 tunecontrol = tune.control(sampling = "fix"))
+
+
+svm.tune
+
+
+# svm
+p.svm<- predict(svm.fit,test, type="decision")
+pr<-prediction(p.svm, test$Response)
+pref <- performance(pr, "tpr", "fpr")
+plot.svm <- plot.roc(as.numeric(test$Response), as.numeric(p.svm),lwd=2, type="b",print.auc=TRUE,col ="green")
+
+#Sensitivity, Specificity, Accuracy
+pred <- predict(svm.fit, newdata = test, type ="response")
+pred <- round(as.numeric(pred))
+response.pred <- factor(ifelse(pred >=0.50, "Yes", "No"))
+actual_resp <- factor(ifelse(test$Response== '1',"Yes","No"))
+conf_final <- confusionMatrix(response.pred, actual_resp, positive = "Yes")
+accuracy <- conf_final$overall[1]
+sensitivity <- conf_final$byClass[1]
+specificity <- conf_final$byClass[2]
+accuracy
+sensitivity
+specificity
+
+
+#Visualizing the Training set results
+
+install.packages("ElemStatLearn")
+library(ElemStatLearn)
+
+# Plotting the training data set results
+
+#SET ROC
+glm.roc <- roc(response = test$Response, predictor = as.numeric(p.glm))
+svm.roc <- roc(response = test$Response, predictor = as.numeric(p.svm))
+rf.roc <- roc(response = test$Response, predictor = as.numeric(rf_p_test))
+
+
+#PLOT ROC
+plot(glm.roc,legacy.axes = TRUE, print.auc = TRUE,  main="ROC Curve GLM")
+plot(svm.roc, legacy.axes = TRUE, print.auc = TRUE,  main="ROC Curve SVM")
+plot(rf.roc,  legacy.axes = TRUE, print.auc = TRUE,  main="ROC Curve RF")
+plot(glm.roc,legacy.axes = TRUE,print.auc =FALSE, main="Combined ROC Curves")
+plot(svm.roc, col = "blue", add = TRUE,print.auc = FALSE)
+plot(rf.roc, col = "red" , add = TRUE,  print.auc = FALSE)
+legend("bottom", c("Random Forest", "Support Vector Machine", "Logistic Reg"),
+       lty = c(1,1), lwd = c(2, 2), col = c("red", "blue", "black"), cex = 0.75)
+
+#Visualizing the Test set results
+
+#Ridge Regression and Lasso
+#set.seed(2)
+#pls.fit <- plsr(Response ~ ., data=train, scale=TRUE, validation="CV")
+#summary(pls.fit)
+
+
+
+#Unsupervised Learning
+#K-means
+set.seed(100)
+sample = sample.split(df$Response, SplitRatio = .20)
+newDF = subset(df, sample == TRUE)
+dim(newDF)
+str(df)
+distances <- dist(newDF[8:10], method="euclidean")
+clusterCust <- hclust(distances, method = "ward.D")
+
+
+newDF$Gender <- as.numeric(newDF$Gender)
+newDF$Vehicle_Age <- as.numeric(newDF$Vehicle_Age)
+newDF$Vehicle_Damage   <- as.numeric(newDF$Vehicle_Damage)
+str(newDF)
+
+newDF[8:10]
+
+head(newDF)
+str(df)
+data <- df[ ,8]
+dim(df)
+km.out <- kmeans(data, 3, nstart = 1000)
+summary(km.out)
+km.out$cluster
+km.out
+plot(data, 
+    col = (km.out$cluster + 1),
+     main = "k-means with 4 clusters",
+     pch = 20, cex=2)
+
+km.out$tot.withinss
+
+library(ggbiplot)
+pr.df <- prcomp(x = df[num_cols], scale = T, center = T)
+summary(pr.df)
+pr.df$center
+
+biplot(pr.df)
+
+
+outliers <- boxplot(df$Age)
+
+hc.complete <- hclust(dist(newDF[8:10]), method="complete")
+hc.average <- hclust(dist(newDF[8:10]), method="average")
+hc.single <- hclust(dist(newDF[8:10]), method="single")
+
+
+par(mfrow=c(1,3))
+plot(hc.complete, main="Complete Linkage", cex=.9)
+plot(hc.average, main="Average Linkage", cex=.9)
+plot(hc.single, main="Single Linkage", cex=.9)
+cutree(hc.complete, 2)
+cutree(hc.average, 2)
+cutree(hc.single, 2)
+str(newDF)
+
+newDF$Vehicle_Age[newDF$Vehicle_Age == '0'] <- '< 1 Year'
+newDF$Vehicle_Age[newDF$Vehicle_Age == '1'] <- '1-2 Year'
+newDF$Vehicle_Age[newDF$Vehicle_Age == '2'] <- '> 2 Years'
+
+
+newDF$Vehicle_Age <- as.character(x = newDF$Vehicle_Age)
+
+
+
+str(newDF)
+
+data <- newDF[,-which(names(newDF)=="Vehicle_Age")]
+data <- data[,-which(names(data)=="Vehicle_Damage")]
+data <- data[,-which(names(data)=="Response")]
+clusters <- hclust(dist(data[2:9]))
+plot(clusters)
+
+
+
+nums <- unlist(lapply(newDF, is.numeric))  
+nums
+
+data <- newDF[,nums]
+data <- data[,-which(names(data)=="Driving_License")]
+
+#K-means
+install.packages("ggfortify")
+installed.packages("ggplot2")
+library(ggfortify)
+library(ggplot2)
+wssplot <- function(m, nc=15, seed=1234){
+   wss <- (nrow(data)-1)*sum(apply(data,2,var))
+    for (i in 2:nc){
+        set.seed(seed)
+        wss[i] <- sum(kmeans(data, centers=i)$withinss)}
+     plot(1:nc, wss, type="b", xlab="Number of Clusters",
+                   ylab="Within groups sum of squares")}
+
+wssplot(data)
+data[] <- lapply(newDF, function(x) as.numeric(as.character(x)))
+
+
+
+set.seed(123)
+km.data <- kmeans(data,centers = 3, iter.max = 10)
+km.data$cluster
+km.data$withinss
+wssplot(newDF)
+
+
+
+#Evaluate Cluster Analysis
+#Cluster Plot
+autoplot(km.data, data, frame=TRUE)
+
+str(data)
+
+data.dist <- dist(data, method="euclidean")
+
+hc.complete <- hclust(data.dist, method="complete")
+hc.average <- hclust(data.dist, method="average")
+plot(hc.complete, cex = 0.75)
+plot(hc.average, cex = 0.75)
+rect.hclust(hc.average, k = 2)
